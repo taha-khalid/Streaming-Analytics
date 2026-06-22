@@ -262,3 +262,16 @@ Set:
 ### Missing dashboard data
 
 - Ensure `.mode("append")` in Spark streaming sink
+
+---
+
+## 📌 Tech Stack
+
+- Python 3.11 / 3.12
+- Apache Spark Structured Streaming 4.1.2
+- Redpanda (Kafka-compatible broker)
+- Docker Desktop
+- Grafana
+- Azure 2019 Public Dataset V2
+- Hadoop Winutils (Windows support)
+- Java 17 (Temurin)
