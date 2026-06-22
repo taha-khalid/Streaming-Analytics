@@ -1,3 +1,6 @@
+*SSH_Keys*
+*data*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
