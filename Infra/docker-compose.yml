@@ -1,0 +1,23 @@
+version: "3.7"
+services:
+  # Redpanda acts as our ultra-lightweight Kafka broker
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v23.2.1
+    command:
+      - redpanda start
+      - --smp 1
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"
+
+  # Grafana for real-time visualization
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - redpanda
