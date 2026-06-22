@@ -43,8 +43,8 @@ Windows requires a specific binary helper to mimic Linux file permissions for Sp
 
 Make sure Docker Desktop is running, then open a terminal in your project directory and execute:
 
-```bash
-docker-compose up -d
+````bash
+docker-compose up -d ```
 This starts Redpanda (listening on port 19092) and Grafana (listening on port 3000) in detached background mode.
 
 4. Initialize Python Virtual Environment
@@ -88,4 +88,4 @@ JAVA_GATEWAY_EXITED Error: Your system is likely using an unsupported Java versi
 HADOOP_HOME ... unset Error: Your system cannot find winutils.exe. Double-check that the file exists exactly at C:\hadoop\bin\winutils.exe and that you restarted your terminal after applying system environment variables.
 
 NoSuchMethodError (Scala/Kafka): Ensure you are initializing the Spark Session using the _2.13 Scala artifact, as PySpark 4.x deprecates the older Scala _2.12 packages.
-```
+````
