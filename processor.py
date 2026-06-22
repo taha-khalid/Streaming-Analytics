@@ -3,21 +3,21 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, from_json, current_timestamp, window, avg
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType
 
-# Detect your exact installed PySpark version dynamically
 pyspark_version = pyspark.__version__
 print(f"📦 Detected PySpark Version: {pyspark_version}")
 
-# 1. Switched to _2.13 to perfectly match PySpark 4's Scala runtime
+# 1. Initialize Spark with BOTH the Kafka and PostgreSQL JDBC driver packages
 spark = SparkSession.builder \
     .appName("AzureTelemetryProcessor") \
-    .config("spark.jars.packages", f"org.apache.spark:spark-sql-kafka-0-10_2.13:{pyspark_version}") \
+    .config("spark.jars.packages", 
+            f"org.apache.spark:spark-sql-kafka-0-10_2.13:{pyspark_version},"
+            f"org.postgresql:postgresql:42.7.2") \
     .config("spark.sql.shuffle.partitions", "2") \
     .getOrCreate()
 
-# Hide messy log spam, only show warnings/errors
 spark.sparkContext.setLogLevel("WARN")
 
-# 2. Define the schema matching our incoming Kafka JSON data
+# Schema definitions
 schema = StructType([
     StructField("timestamp", StringType(), True),
     StructField("vm_id", StringType(), True),
@@ -25,7 +25,7 @@ schema = StructType([
     StructField("mem", DoubleType(), True)
 ])
 
-# 3. Read the live stream from local Redpanda/Kafka
+# Read from Redpanda
 raw_stream = spark.readStream \
     .format("kafka") \
     .option("kafka.bootstrap.servers", "localhost:19092") \
@@ -33,28 +33,41 @@ raw_stream = spark.readStream \
     .option("startingOffsets", "latest") \
     .load()
 
-# 4. Parse JSON and append a processing timestamp
+# Parse JSON payloads
 parsed_stream = raw_stream \
     .selectExpr("CAST(value AS STRING) as json_payload") \
     .select(from_json(col("json_payload"), schema).alias("data")) \
     .select("data.*") \
-    .withColumn("ingest_time", current_timestamp())  # Generates real-world time for windows
+    .withColumn("ingest_time", current_timestamp())
 
-# 5. Aggregate: Calculate average CPU in a rolling 30-second window, updating every 10 seconds
+# Compute 30-second rolling aggregates updated every 10 seconds
 aggregated_df = parsed_stream \
     .groupBy(
         window(col("ingest_time"), "30 seconds", "10 seconds"),
         col("vm_id")
     ) \
     .agg(avg("cpu").alias("avg_cpu")) \
-    .orderBy(col("window.start").desc())
+    .select(
+        col("window.start").alias("window_start"),
+        col("window.end").alias("window_end"),
+        col("vm_id"),
+        col("avg_cpu")
+    )
 
-# 6. Push the stream processing results straight to your console screen
+# 2. Write Stream directly to TimescaleDB via JDBC
+# Note: Since it's an aggregation stream, we must use "complete" output mode
 query = aggregated_df.writeStream \
     .outputMode("complete") \
-    .format("console") \
-    .option("truncate", "false") \
-    .start()
+    .foreachBatch(lambda df, epoch_id: df.write \
+        .format("jdbc") \
+        .option("url", "jdbc:postgresql://localhost:5432/telemetry_db") \
+        .option("dbtable", "vm_cpu_aggregates") \
+        .option("user", "postgres") \
+        .option("password", "password") \
+        .option("driver", "org.postgresql.Driver") \
+        .mode("append") \
+        .save() \
+    ).start()
 
-print("🔥 PySpark Engine is running and listening to Redpanda...")
+print("🔥 PySpark Engine is running and piping aggregates directly to TimescaleDB...")
 query.awaitTermination()
