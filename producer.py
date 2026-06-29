@@ -4,7 +4,10 @@ import time
 import random
 import os
 import glob
+import sys
 from kafka import KafkaProducer
+
+sys.stdout.reconfigure(encoding='utf-8')
 
 # =============================================================================
 # CONFIGURATION
@@ -15,11 +18,8 @@ DATA_DIR = './data/azure-dataset/cpu'
 
 # Streaming simulation parameters
 TICKS_PER_BATCH = 1000       # How many 5-min trace ticks to read (~83 hours trace)
-VMS_PER_TICK = 50            # Sample N VMs per tick (dataset has ~227k VMs/tick)
-TICKS_PER_SECOND = 10        # Real-time replay speed (10 ticks/sec = 100s to consume)
-MISSING_DATA_RATE = 0.15     # Simulate 15% missing memory for Sample-and-Hold demo
-MEMORY_BASE = 20.0
-MEMORY_CPU_SCALE = 0.5
+VMS_PER_TICK = 10              # Sample N VMs per tick (dataset has ~227k VMs/tick)
+TICKS_PER_SECOND = 2           # Real-time replay speed (2 ticks/sec = 500s to consume 1000 ticks)
 
 # =============================================================================
 # KAFKA PRODUCER
@@ -40,17 +40,6 @@ def get_data_files():
     if not files:
         raise FileNotFoundError(f"No CSV files found in {DATA_DIR}")
     return files
-
-
-def generate_memory(cpu_avg):
-    """
-    Synthetic memory usage correlated to CPU.
-    The Azure V2 dataset does not ship memory readings natively;
-    this function simulates realistic VM memory based on CPU load.
-    """
-    noise = random.uniform(-3.0, 3.0)
-    mem = MEMORY_BASE + (cpu_avg * MEMORY_CPU_SCALE) + noise
-    return round(max(5.0, min(95.0, mem)), 4)
 
 
 def read_trace_batches(files):
@@ -87,6 +76,7 @@ def read_trace_batches(files):
                     tick_count += 1
                     current_rows = []
                     rows_in_tick = 0
+                    current_tick = trace_time  # <-- BUG FIX: reset to new tick
 
                     if tick_count >= TICKS_PER_BATCH:
                         return
@@ -117,19 +107,12 @@ def produce_tick(trace_tick, rows, base_time, tick_idx):
     event_time = base_time + tick_idx
 
     for row in rows:
-        memory = generate_memory(row['avg_cpu'])
-
-        # Simulate missing / irregular data for Sample-and-Hold demonstration
-        if random.random() < MISSING_DATA_RATE:
-            memory = None
-
         payload = {
             'event_time': event_time,
             'vm_id': row['vm_id'],
             'min_cpu': round(row['min_cpu'], 4),
             'max_cpu': round(row['max_cpu'], 4),
-            'avg_cpu': round(row['avg_cpu'], 4),
-            'memory': memory
+            'avg_cpu': round(row['avg_cpu'], 4)
         }
         producer.send(TOPIC, value=payload)
 
@@ -140,7 +123,6 @@ def produce_tick(trace_tick, rows, base_time, tick_idx):
 def main():
     files = get_data_files()
     print(f"🚀 Producer started — {len(files)} file(s) | {TICKS_PER_BATCH} ticks | {VMS_PER_TICK} VMs/tick")
-    print(f"   Missing data rate: {MISSING_DATA_RATE*100:.0f}% (for Sample-and-Hold demo)")
 
     base_time = int(time.time())
     loop_count = 0

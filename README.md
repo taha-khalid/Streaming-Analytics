@@ -9,7 +9,7 @@ An end-to-end, production-grade streaming analytics pipeline built as a local sa
 ```
 Azure Telemetry Dataset (.csv.gz)
         │
-        ▼ (producer.py — reads CSV, adds synthetic memory, sends to Kafka)
+        ▼ (producer.py — reads CSV, sends to Kafka)
 Redpanda Distributed Broker (Kafka API)
         │
         ▼ (processor.py — Spark Structured Streaming with 3 operators)
@@ -33,7 +33,7 @@ TimescaleDB Hypertables ◄──► Live Grafana Dashboard
 | Container Engine | Docker Desktop       | Latest Stable                         |
 | Language Runtime | Python               | 3.11 or 3.12                          |
 | Java Runtime     | Eclipse Temurin JDK  | 17 (Required for Spark compatibility) |
-| Message Broker   | Redpanda (Kafka API) | Containerized v23.2.1 or later        |
+| Message Broker   | Redpanda (Kafka API) | Containerized v23.2.1 or later          |
 | Time-Series DB   | TimescaleDB          | latest-pg15                           |
 | Stream Engine    | Apache PySpark       | 3.5.x                                 |
 | Windows Helper   | Hadoop Winutils      | 3.3.0                                 |
@@ -44,15 +44,20 @@ TimescaleDB Hypertables ◄──► Live Grafana Dashboard
 
 ### 1. Install Java 17 (OpenJDK)
 
-1. Download Windows x64 MSI from Microsoft Open JDK 17:
-   https://learn.microsoft.com/en-us/java/openjdk/download
-2. Install it.
-3. **Important:** Enable **"Set JAVA_HOME environment variable"**
+**Download and extract** Eclipse Temurin JDK 17 to:
+
+```
+C:\Users\Havoc\java17\jdk-17.0.12+7
+```
+
+If you have a different Java 17 installation, update the path in `run_pipeline.ps1` accordingly.
 
 Verify:
 ```powershell
-java -version
+C:\Users\Havoc\java17\jdk-17.0.12+7\bin\java -version
 ```
+
+> **Note:** Spark 3.5.x does **not** support Java 24. You must use Java 17 or Java 21.
 
 ---
 
@@ -66,13 +71,14 @@ Spark on Windows requires a native Hadoop helper binary.
 C:\hadoop\bin
 ```
 
-2. Download `winutils.exe` for Hadoop 3.3.0:
-   https://github.com/cdarlint/winutils/blob/master/hadoop-3.3.0/bin/winutils.exe
+2. Download `winutils.exe` and `hadoop.dll` for Hadoop 3.3.0 from:
+   https://github.com/cdarlint/winutils/tree/master/hadoop-3.3.0/bin
 
-3. Place it here:
+3. Place both files here:
 
 ```
 C:\hadoop\bin\winutils.exe
+C:\hadoop\bin\hadoop.dll
 ```
 
 4. Set environment variable:
@@ -145,7 +151,7 @@ pip install -r requirements.txt
 ```
 
 This script will:
-1. Verify Java, Python, and Docker
+1. Verify Java 17, Python, and Docker
 2. Start the Docker stack (if not already running)
 3. Launch the Spark processor in a background job
 4. Launch the Kafka producer in a background job
@@ -153,27 +159,24 @@ This script will:
 
 ---
 
-### Option B: Manual Steps
+### Option B: Manual Steps (Two Terminals)
 
-#### Phase 1: Start Docker Infrastructure
+#### Terminal 1 — Start the Spark Processor
 
 ```powershell
+$env:JAVA_HOME = "C:\Users\Havoc\java17\jdk-17.0.12+7"
+$env:HADOOP_HOME = "C:\hadoop"
+$env:PATH = "$env:JAVA_HOME\bin;$env:HADOOP_HOME\bin;$env:PATH"
 cd Infra
 docker compose up -d
-```
-
-Wait ~15 seconds for all services to be healthy.
-
-#### Phase 2: Start the Spark Processor
-
-```powershell
+cd ..
 .\venv\Scripts\activate
 python processor.py
 ```
 
 First run may take 1–2 minutes to download Kafka + JDBC dependencies from Maven.
 
-#### Phase 3: Start the Producer (in a new terminal)
+#### Terminal 2 — Start the Producer
 
 ```powershell
 .\venv\Scripts\activate
@@ -200,11 +203,8 @@ The dashboard is **auto-provisioned** and includes:
 | Panel | Description | Operator |
 |-------|-------------|----------|
 | **CPU Moving Average by VM** | Sliding-window avg of CPU per VM | Moving Average |
-| **Memory Moving Average by VM** | Sliding-window avg of memory per VM | Moving Average |
 | **Cross-VM CPU Correlation** | Paired VM CPU metrics from time-based join | Time-Based Join |
-| **Cross-VM Memory Correlation** | Paired VM memory metrics from time-based join | Time-Based Join |
-| **CPU Sample-and-Hold** | Step-plot of forward-filled CPU values | Sample-and-Hold |
-| **Memory Sample-and-Hold** | Step-plot of forward-filled memory values | Sample-and-Hold |
+| **CPU Sample-and-Hold** | Step-plot of last-known CPU values per window | Sample-and-Hold |
 | **Records per Window** | Bar chart of throughput | Health |
 | **Top 10 VMs by Avg CPU** | Bar gauge of hottest VMs | Health |
 | **Latest VM Summary** | Table of latest aggregated stats | Health |
@@ -222,7 +222,6 @@ Slide:  20 seconds
 
 Spark Structured Streaming groups events by `(window, vm_id)` and computes:
 - `avg(avg_cpu)` — mean CPU utilization
-- `avg(memory)` — mean memory utilization
 - `max(max_cpu)` — peak CPU in window
 - `min(min_cpu)` — minimum CPU in window
 - `count(*)` — number of raw events
@@ -237,10 +236,10 @@ This creates overlapping windows (sliding) that smooth short-term spikes and rev
 
 ```
 Join condition: vm_id_a != vm_id_b
-                AND event_time within ±2 minutes
+                AND event_time falls within the same 10-second bucket
 ```
 
-Two independent Kafka source streams are joined on event time. This detects VMs that are experiencing similar CPU/memory pressure at the same time, which can indicate:
+Two independent Kafka source streams are joined on a common 10-second time bucket. This detects VMs that are experiencing similar CPU pressure at the same time, which can indicate:
 - Co-located noisy neighbors
 - Cluster-wide workload spikes
 - Scheduled batch jobs running across multiple VMs
@@ -249,20 +248,14 @@ Two independent Kafka source streams are joined on event time. This detects VMs 
 
 ---
 
-### Operator 3: Sample-and-Hold (Forward Fill)
+### Operator 3: Sample-and-Hold (Last Value Per Window)
 
 ```
 Window: 30 seconds (tumbling)
 Aggregation: last(avg_cpu, ignoreNulls=True)
-             last(memory, ignoreNulls=True)
 ```
 
-The producer intentionally drops ~15% of memory readings to simulate sensor failure or irregular reporting. The Sample-and-Hold operator:
-1. Groups events into 30-second tumbling windows per VM
-2. Uses `last(..., ignoreNulls=True)` to carry forward the last known non-null value
-3. Produces a stepped time-series that never has gaps
-
-This is essential for downstream analytics that cannot tolerate missing data.
+Captures the last known CPU reading within each tumbling window. This demonstrates the canonical "last-value propagation" pattern used in streaming systems to handle irregular or sparse reporting cadences.
 
 **Output table:** `vm_metrics_held`
 
@@ -274,19 +267,11 @@ The **Azure 2019 Public Dataset V2** ships CPU readings as `.csv.gz` files. Each
 
 | Column | Description |
 |--------|-------------|
-| timestamp | Relative trace time (seconds from start) |
-| vm_id | Unique VM identifier (hashed) |
-| min_cpu | Minimum CPU % in the 5-minute interval |
-| max_cpu | Maximum CPU % in the 5-minute interval |
-| avg_cpu | Average CPU % in the 5-minute interval |
-
-**Memory readings** are not included in the public CPU dataset. The producer generates **synthetic memory** correlated to CPU load:
-
-```python
-memory = 20.0 + (cpu_avg * 0.5) + noise(-3, +3)
-```
-
-This is a realistic model because higher CPU utilization typically correlates with higher memory pressure in cloud VMs.
+| `timestamp` | Relative trace time (seconds from start) |
+| `vm_id` | Unique VM identifier (hashed) |
+| `min_cpu` | Minimum CPU % in the 5-minute interval |
+| `max_cpu` | Maximum CPU % in the 5-minute interval |
+| `avg_cpu` | Average CPU % in the 5-minute interval |
 
 ---
 
@@ -294,24 +279,24 @@ This is a realistic model because higher CPU utilization typically correlates wi
 
 ### JAVA_GATEWAY_EXITED
 
-- Ensure Java 17 is active
-- Check `java -version`
-- Fix `JAVA_HOME`
+- Ensure Java 17 is active (NOT Java 24)
+- Check `C:\Users\Havoc\java17\jdk-17.0.12+7\bin\java -version`
+- Update `JAVA_HOME` in `run_pipeline.ps1` if your path differs
 
 ---
 
 ### HADOOP_HOME issue
 
 - Must be: `C:\hadoop`
+- Both `winutils.exe` and `hadoop.dll` must be in `C:\hadoop\bin\`
 - Restart terminal after changes
-- Ensure `C:\hadoop\bin\winutils.exe` exists
 
 ---
 
 ### Kafka / Scala error
 
-- Ensure the Kafka package version matches your PySpark version
-- The processor uses `spark-sql-kafka-0-10_2.13` — if this fails, try `_2.12`
+- Ensure the Kafka package uses `_2.12` (matching PySpark's Scala version)
+- The processor already uses `spark-sql-kafka-0-10_2.12:3.5.4`
 
 ---
 
@@ -342,7 +327,7 @@ Remove-Item -Recurse -Force C:\hadoop\checkpoints\telemetry_pipeline
 - Grafana (auto-provisioned)
 - TimescaleDB (PostgreSQL extension)
 - Azure 2019 Public Dataset V2
-- Hadoop Winutils (Windows support)
+- Hadoop Winutils + hadoop.dll (Windows support)
 - Java 17 (Temurin)
 
 ---
@@ -351,13 +336,14 @@ Remove-Item -Recurse -Force C:\hadoop\checkpoints\telemetry_pipeline
 
 ```
 Streaming-Analytics/
-├── producer.py                          # Kafka producer (reads CSV, simulates memory)
+├── producer.py                          # Kafka producer (reads CSV, replays as live stream)
 ├── processor.py                         # Spark Structured Streaming (3 operators)
 ├── requirements.txt                     # Python dependencies
 ├── run_pipeline.ps1                     # One-click orchestration script
 ├── Infra/
 │   ├── docker-compose.yml               # Docker stack definition
 │   ├── table_creation_query.pgsql       # TimescaleDB schema
+│   ├── init_schema.sql                  # Standalone schema init script
 │   └── grafana/
 │       ├── provisioning/
 │       │   ├── datasources/postgres.yml # Auto-configured PostgreSQL datasource
@@ -367,7 +353,8 @@ Streaming-Analytics/
 ├── data/
 │   └── azure-dataset/
 │       └── cpu/                         # Azure V2 CPU readings (.csv.gz)
-└── README.md                            # This file
+├── README.md                            # This file
+└── PROJECT_REPORT.md                    # Comprehensive project report
 ```
 
 ---

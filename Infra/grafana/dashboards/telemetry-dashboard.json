@@ -36,7 +36,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 1 },
       "id": 1,
       "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max", "lastNotNull"] }, "tooltip": { "mode": "multi" } },
       "targets": [
@@ -48,29 +48,6 @@
         }
       ],
       "title": "CPU Moving Average by VM",
-      "type": "timeseries"
-    },
-    {
-      "datasource": "TelemetryDB",
-      "fieldConfig": {
-        "defaults": {
-          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "pointSize": 0, "showPoints": "never" },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
-      "id": 2,
-      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max", "lastNotNull"] }, "tooltip": { "mode": "multi" } },
-      "targets": [
-        {
-          "format": "time_series",
-          "rawQuery": true,
-          "rawSql": "SELECT\n  time_bucket('10 seconds', window_start) AS time,\n  vm_id AS metric,\n  avg(avg_memory) AS value\nFROM vm_cpu_aggregates\nWHERE window_start >= $__timeFrom()\n  AND window_start <= $__timeTo()\nGROUP BY time, vm_id\nORDER BY time;",
-          "refId": "A"
-        }
-      ],
-      "title": "Memory Moving Average by VM",
       "type": "timeseries"
     },
     {
@@ -90,7 +67,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 10 },
       "id": 3,
       "options": { "legend": { "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "multi" } },
       "targets": [
@@ -105,34 +82,11 @@
       "type": "timeseries"
     },
     {
-      "datasource": "TelemetryDB",
-      "fieldConfig": {
-        "defaults": {
-          "custom": { "drawStyle": "line", "lineInterpolation": "linear", "pointSize": 3, "showPoints": "always" },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
-      "id": 4,
-      "options": { "legend": { "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "multi" } },
-      "targets": [
-        {
-          "format": "time_series",
-          "rawQuery": true,
-          "rawSql": "SELECT\n  time_bucket('10 seconds', window_start) AS time,\n  vm_id_a || ' x ' || vm_id_b AS metric,\n  avg(memory_a) AS value\nFROM vm_cpu_correlations\nWHERE window_start >= $__timeFrom()\n  AND window_start <= $__timeTo()\nGROUP BY time, vm_id_a, vm_id_b\nORDER BY time;",
-          "refId": "A"
-        }
-      ],
-      "title": "Cross-VM Memory Correlation (Time-Join)",
-      "type": "timeseries"
-    },
-    {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
       "id": 52,
       "panels": [],
-      "title": "Operator 3 — Sample-and-Hold (Forward Fill)",
+      "title": "Operator 3 — Sample-and-Hold (Last Value Per Window)",
       "type": "row"
     },
     {
@@ -144,7 +98,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 19 },
       "id": 5,
       "options": { "legend": { "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "multi" } },
       "targets": [
@@ -156,29 +110,6 @@
         }
       ],
       "title": "CPU Sample-and-Hold (Step Plot)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": "TelemetryDB",
-      "fieldConfig": {
-        "defaults": {
-          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "pointSize": 0, "showPoints": "never" },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
-      "id": 6,
-      "options": { "legend": { "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "multi" } },
-      "targets": [
-        {
-          "format": "time_series",
-          "rawQuery": true,
-          "rawSql": "SELECT\n  time_bucket('10 seconds', window_start) AS time,\n  vm_id AS metric,\n  avg(memory_held) AS value\nFROM vm_metrics_held\nWHERE window_start >= $__timeFrom()\n  AND window_start <= $__timeTo()\nGROUP BY time, vm_id\nORDER BY time;",
-          "refId": "A"
-        }
-      ],
-      "title": "Memory Sample-and-Hold (Step Plot)",
       "type": "timeseries"
     },
     {
@@ -254,7 +185,7 @@
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  vm_id,\n  avg(avg_cpu) AS avg_cpu,\n  avg(avg_memory) AS avg_memory,\n  sum(record_count) AS total_records\nFROM vm_cpu_aggregates\nWHERE window_start >= NOW() - INTERVAL '5 minutes'\nGROUP BY vm_id\nORDER BY avg_cpu DESC\nLIMIT 10;",
+          "rawSql": "SELECT\n  vm_id,\n  avg(avg_cpu) AS avg_cpu,\n  sum(record_count) AS total_records\nFROM vm_cpu_aggregates\nWHERE window_start >= NOW() - INTERVAL '5 minutes'\nGROUP BY vm_id\nORDER BY avg_cpu DESC\nLIMIT 10;",
           "refId": "A"
         }
       ],
@@ -272,5 +203,5 @@
   "timezone": "browser",
   "title": "Cloud Telemetry Streaming Analytics",
   "uid": "telemetry-streaming-01",
-  "version": 1
+  "version": 2
 }

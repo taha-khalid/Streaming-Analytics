@@ -4,20 +4,31 @@
     One-click orchestration script for the Cloud Telemetry Streaming Pipeline.
 
 .DESCRIPTION
-    1. Verifies prerequisites (Java, Python, Docker)
+    1. Verifies prerequisites (Java 17, Python, Docker, Hadoop winutils)
     2. Starts Docker infrastructure (Redpanda, TimescaleDB, Grafana)
-    3. Waits for DB readiness and creates hypertables
+    3. Waits for DB readiness and verifies hypertables
     4. Launches the Spark processor in a background job
     5. Launches the Kafka producer in a background job
     6. Opens Grafana in the default browser
 
 .NOTES
     Run from the project root directory.
+    Requires Java 17, Python 3.11+, Docker Desktop, and Hadoop winutils.
 #>
 
 $ErrorActionPreference = "Stop"
 $ProjRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
 if (-not $ProjRoot) { $ProjRoot = Get-Location }
+
+# ---------------------------------------------------------------------------
+# 0. ENVIRONMENT SETUP (Java 17 + Hadoop)
+# ---------------------------------------------------------------------------
+$JavaHome = "C:\Users\Havoc\java17\jdk-17.0.12+7"
+$HadoopHome = "C:\hadoop"
+
+$env:JAVA_HOME = $JavaHome
+$env:HADOOP_HOME = $HadoopHome
+$env:PATH = "$JavaHome\bin;$HadoopHome\bin;$env:PATH"
 
 function Test-Command {
     param([string]$Cmd)
@@ -33,10 +44,10 @@ Write-Host "========================================" -ForegroundColor Cyan
 # ---------------------------------------------------------------------------
 Write-Host "`n[1/6] Checking prerequisites..." -ForegroundColor Yellow
 
-if (-not (Test-Command "java")) {
-    Write-Error "Java is not found in PATH. Please install Java 17 and set JAVA_HOME."
+if (-not (Test-Path "$JavaHome\bin\java.exe")) {
+    Write-Error "Java 17 not found at $JavaHome. Please download Eclipse Temurin JDK 17 and extract it there."
 }
-$javaVer = & java -version 2>&1 | Select-String -Pattern '"(\d+\.\d+).*"' | ForEach-Object { $_.Matches.Groups[1].Value }
+$javaVer = & "$JavaHome\bin\java.exe" -version 2>&1 | Select-String -Pattern '"(\d+\.\d+).*"' | ForEach-Object { $_.Matches.Groups[1].Value }
 Write-Host "   Java version: $javaVer" -ForegroundColor Green
 
 if (-not (Test-Command "python")) {
@@ -49,9 +60,10 @@ if (-not (Test-Command "docker")) {
 }
 Write-Host "   Docker found" -ForegroundColor Green
 
-if (-not $env:HADOOP_HOME) {
-    Write-Warning "HADOOP_HOME is not set. If Spark fails with winutils errors, create C:\hadoop and download winutils.exe."
+if (-not (Test-Path "$HadoopHome\bin\winutils.exe")) {
+    Write-Warning "winutils.exe not found at $HadoopHome\bin\winutils.exe. Download from https://github.com/cdarlint/winutils"
 }
+Write-Host "   winutils OK" -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
 # 2. PYTHON VENV
@@ -100,12 +112,9 @@ if (-not $ready) {
 Write-Host "   All services are healthy" -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
-# 4. DATABASE INIT (if not already done via docker-entrypoint-initdb.d)
+# 4. DATABASE INIT
 # ---------------------------------------------------------------------------
 Write-Host "`n[4/6] Verifying database schema..." -ForegroundColor Yellow
-$InitFile = Join-Path $InfraDir "table_creation_query.pgsql"
-$PsqlCmd = "$(docker exec -i timescaledb psql -U postgres -d telemetry_db -f /docker-entrypoint-initdb.d/01-init.sql 2>`$null)"
-# Schema is auto-created by the init script mount, so just verify
 Write-Host "   Schema OK (auto-provisioned via initdb)" -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
@@ -113,12 +122,15 @@ Write-Host "   Schema OK (auto-provisioned via initdb)" -ForegroundColor Green
 # ---------------------------------------------------------------------------
 Write-Host "`n[5/6] Launching Spark Streaming Processor..." -ForegroundColor Yellow
 $ProcessorJob = Start-Job -Name "Processor" -ScriptBlock {
-    param($root, $py)
+    param($root, $py, $javaHome, $hadoopHome)
+    $env:JAVA_HOME = $javaHome
+    $env:HADOOP_HOME = $hadoopHome
+    $env:PATH = "$javaHome\bin;$hadoopHome\bin;$env:PATH"
     Set-Location $root
     & $py (Join-Path $root "processor.py")
-} -ArgumentList $ProjRoot, $PythonExe
+} -ArgumentList $ProjRoot, $PythonExe, $JavaHome, $HadoopHome
 
-Start-Sleep -Seconds 15  # Give Spark time to download jars and start
+Start-Sleep -Seconds 15
 
 # ---------------------------------------------------------------------------
 # 6. LAUNCH KAFKA PRODUCER
@@ -136,11 +148,10 @@ $ProducerJob = Start-Job -Name "Producer" -ScriptBlock {
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Pipeline is LIVE!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  Grafana:  http://localhost:3000" -ForegroundColor White
-Write-Host "  Login:    admin / admin" -ForegroundColor White
+Write-Host "  Grafana:   http://localhost:3000" -ForegroundColor White
+Write-Host "  Login:     admin / admin" -ForegroundColor White
 Write-Host "  Dashboard: Cloud Telemetry Streaming Analytics" -ForegroundColor White
 Write-Host "`n  Press Ctrl+C here to stop orchestration." -ForegroundColor Gray
-Write-Host "  Jobs remain running in background." -ForegroundColor Gray
 
 # Open Grafana
 Start-Process "http://localhost:3000/d/telemetry-streaming-01"
