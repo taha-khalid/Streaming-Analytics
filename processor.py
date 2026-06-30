@@ -37,14 +37,17 @@ spark = SparkSession.builder \
     .config("spark.driver.bindAddress", "127.0.0.1") \
     .config("spark.driver.port", "4040") \
     .config("spark.blockManager.port", "4041") \
-    .config("spark.driver.extraJavaOptions", "-Djava.net.preferIPv4Stack=true") \
-    .config("spark.executor.extraJavaOptions", "-Djava.net.preferIPv4Stack=true") \
+    .config("spark.driver.extraJavaOptions", "-Djava.net.preferIPv4Stack=true -Duser.timezone=UTC") \
+    .config("spark.executor.extraJavaOptions", "-Djava.net.preferIPv4Stack=true -Duser.timezone=UTC") \
     .config("spark.locality.wait", "0s") \
     .config("spark.jars.packages",
             f"org.apache.spark:spark-sql-kafka-0-10_2.12:{pyspark_version},"
             f"org.postgresql:postgresql:42.7.2") \
     .config("spark.sql.shuffle.partitions", "15") \
     .getOrCreate()
+
+# Force all timestamp operations to UTC (fixes CEST vs UTC mismatch in Grafana)
+spark.conf.set("spark.sql.session.timeZone", "UTC")
 
 spark.sparkContext.setLogLevel("ERROR")
 
@@ -79,6 +82,7 @@ def create_kafka_source_stream(alias_name):
         .option("kafka.bootstrap.servers", "127.0.0.1:19092") \
         .option("subscribe", "telemetry-stream") \
         .option("startingOffsets", "latest") \
+        .option("failOnDataLoss", "false") \
         .load() \
         .selectExpr("CAST(value AS STRING) as json_payload") \
         .select(from_json(col("json_payload"), telemetry_schema).alias("data")) \
@@ -100,7 +104,11 @@ DB_DRIVER = "org.postgresql.Driver"
 
 def write_to_postgres(df, batch_id, table_name):
     """ForeachBatch sink: write a micro-batch DataFrame to PostgreSQL/TimescaleDB."""
-    if df.isEmpty():
+    try:
+        if df.isEmpty():
+            return
+    except Exception as e:
+        print(f"⚠️  Micro-Batch {batch_id} | Skipped {table_name} (Kafka offset gap): {e}")
         return
 
     print(f"\n🚀 Micro-Batch {batch_id} | Writing to table: {table_name}")

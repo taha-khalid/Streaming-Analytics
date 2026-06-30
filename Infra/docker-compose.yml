@@ -49,8 +49,7 @@ services:
       - "3000:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_INSTALL_PLUGINS=grafana-timescaledb-datasource
+      - GF_SECURITY_ADMIN_PASSWORD=bObgUv22Mr8WhR
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro

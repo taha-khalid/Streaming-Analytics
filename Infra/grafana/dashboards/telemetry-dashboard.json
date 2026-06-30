@@ -161,7 +161,7 @@
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  vm_id,\n  avg(avg_cpu) AS avg_cpu\nFROM vm_cpu_aggregates\nWHERE window_start >= NOW() - INTERVAL '5 minutes'\nGROUP BY vm_id\nORDER BY avg_cpu DESC\nLIMIT 10;",
+          "rawSql": "SELECT\n  vm_id,\n  avg(avg_cpu) AS avg_cpu\nFROM vm_cpu_aggregates\nWHERE window_start >= $__timeFrom()\nGROUP BY vm_id\nORDER BY avg_cpu DESC\nLIMIT 10;",
           "refId": "A"
         }
       ],
@@ -185,7 +185,7 @@
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  vm_id,\n  avg(avg_cpu) AS avg_cpu,\n  sum(record_count) AS total_records\nFROM vm_cpu_aggregates\nWHERE window_start >= NOW() - INTERVAL '5 minutes'\nGROUP BY vm_id\nORDER BY avg_cpu DESC\nLIMIT 10;",
+          "rawSql": "SELECT\n  vm_id,\n  avg(avg_cpu) AS avg_cpu,\n  sum(record_count) AS total_records\nFROM vm_cpu_aggregates\nWHERE window_start >= $__timeFrom()\nGROUP BY vm_id\nORDER BY avg_cpu DESC\nLIMIT 10;",
           "refId": "A"
         }
       ],
@@ -198,7 +198,7 @@
   "style": "dark",
   "tags": ["streaming", "telemetry", "spark"],
   "templating": { "list": [] },
-  "time": { "from": "now-5m", "to": "now" },
+  "time": { "from": "now-6h", "to": "now+1h" },
   "timepicker": { "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m", "30m", "1h", "2h", "1d"] },
   "timezone": "browser",
   "title": "Cloud Telemetry Streaming Analytics",
