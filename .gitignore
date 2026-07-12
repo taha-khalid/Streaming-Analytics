@@ -1,5 +1,7 @@
 *SSH_Keys*
 *data*
+*venv*
+*log*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
