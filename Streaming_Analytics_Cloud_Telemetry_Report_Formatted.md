@@ -50,7 +50,74 @@ The entire stack runs locally on Windows using Docker Desktop, requiring zero cl
 ### 3.1 High-Level Data Flow
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐│                         DATA LAYER                                   ││  Azure V2 CPU Readings (.csv.gz)                                     ││  Columns: timestamp | vm_id | min_cpu | max_cpu | avg_cpu           ││  ~227,000 VMs per 5-min tick | 10M rows per file                   │└────────────────────────┬────────────────────────────────────────────┘│▼ producer.py┌─────────────────────────────────────────────────────────────────────┐│                       INGESTION LAYER                                ││  • Reads multiple CSV files                                          ││  • Samples 50 VMs per tick (scaled up from 10 to ensure join density)││  • Sends JSON events to Kafka topic telemetry-stream              ││  • Replay rate: 1 tick/sec (optimized for stable window processing)  │└────────────────────────┬────────────────────────────────────────────┘│▼ Redpanda (Kafka API on :19092)┌─────────────────────────────────────────────────────────────────────┐│                      MESSAGE BROKER                                  ││  • Redpanda v23.2.1 — ultra-lightweight Kafka-compatible broker   ││  • Topic: telemetry-stream                                        ││  • External listener: localhost:19092                               │└────────────────────────┬────────────────────────────────────────────┘│▼ processor.py (3 parallel queries)┌─────────────────────────────────────────────────────────────────────┐│                      PROCESSING LAYER                                ││  ┌─────────────────────────────────────────────────────────────┐    ││  │  Query 1 — MOVING AVERAGE                                     │    ││  │  window(60s, 20s) + groupBy(vm_id)                         │    ││  │  → avg_cpu, max_cpu, min_cpu, record_count                  │    ││  │  → Sink: vm_cpu_aggregates                                 │    ││  └─────────────────────────────────────────────────────────────┘    ││  ┌─────────────────────────────────────────────────────────────┐    ││  │  Query 2 — TIME-BASED JOIN                                   │    ││  │  Two streams joined with explicit dataframe references       │    ││  │  condition: event-time bounds and matching prefixes         │    ││  │  → cpu_a, cpu_b                                             │    ││  │  → Sink: vm_cpu_correlations                               │    ││  └─────────────────────────────────────────────────────────────┘    ││  ┌─────────────────────────────────────────────────────────────┐    ││  │  Query 3 — SAMPLE-AND-HOLD                                  │    ││  │  window(5m, 10s) + last(avg_cpu, True)                      │    ││  │  → cpu_held, last_event_time                                │    ││  │  → Sink: vm_metrics_held                                    │    ││  └─────────────────────────────────────────────────────────────┘    │└────────────────────────┬────────────────────────────────────────────┘│▼ JDBC (postgresql:42.7.2)┌─────────────────────────────────────────────────────────────────────┐│                        STORAGE LAYER                                 ││  TimescaleDB (PostgreSQL 15 + TimescaleDB extension)               ││  • 3 Hypertables: vm_cpu_aggregates, vm_cpu_correlations,          ││    vm_metrics_held                                                  ││  • Chunked by time column for automatic partitioning               ││  • Connection: localhost:5432 | postgres / password                │└────────────────────────┬────────────────────────────────────────────┘│▼ PostgreSQL datasource┌─────────────────────────────────────────────────────────────────────┐│                     VISUALIZATION LAYER                              ││  Grafana (auto-provisioned)                                         ││  • URL: http://localhost:3000                                        ││  • Login: admin / admin                                              ││  • Dashboard: "Cloud Telemetry Streaming Analytics"                  ││  • 6 panels: 3 operator rows + 3 health panels                     ││  • Auto-refresh: 5 seconds                                           │└─────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                                DATA LAYER                                │
+│  Azure V2 CPU Readings (.csv.gz)                                         │
+│  Columns: timestamp | vm_id | min_cpu | max_cpu | avg_cpu                │
+│  ~227,000 VMs per 5-min tick | 10M rows per file                         │
+└────────────────────────────────────┬─────────────────────────────────────┘
+                                     │
+                                     ▼ producer.py
+┌──────────────────────────────────────────────────────────────────────────┐
+│                             INGESTION LAYER                              │
+│  • Reads multiple CSV files                                              │
+│  • Samples 50 VMs per tick (scaled up from 10 to ensure join density)    │
+│  • Sends JSON events to Kafka topic telemetry-stream                     │
+│  • Replay rate: 1 tick/sec (optimized for stable window processing)      │
+└────────────────────────────────────┬─────────────────────────────────────┘
+                                     │
+                                     ▼ Redpanda (Kafka API on :19092)
+┌──────────────────────────────────────────────────────────────────────────┐
+│                             MESSAGE BROKER                               │
+│  • Redpanda v23.2.1 — ultra-lightweight Kafka-compatible broker          │
+│  • Topic: telemetry-stream                                               │
+│  • External listener: localhost:19092                                    │
+└────────────────────────────────────┬─────────────────────────────────────┘
+                                     │
+                                     ▼ processor.py (3 parallel queries)
+┌──────────────────────────────────────────────────────────────────────────┐
+│                            PROCESSING LAYER                              │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │                     Query 1 — MOVING AVERAGE                       │  │
+│  │  window(60s, 20s) + groupBy(vm_id)                                 │  │
+│  │  → avg_cpu, max_cpu, min_cpu, record_count                         │  │
+│  │  → Sink: vm_cpu_aggregates                                         │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │                     Query 2 — TIME-BASED JOIN                      │  │
+│  │  Two streams joined with explicit dataframe references              │  │
+│  │  condition: event-time bounds and matching prefixes                │  │
+│  │  → cpu_a, cpu_b                                                    │  │
+│  │  → Sink: vm_cpu_correlations                                       │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │                     Query 3 — SAMPLE-AND-HOLD                      │  │
+│  │  window(5m, 10s) + last(avg_cpu, True)                             │  │
+│  │  → cpu_held, last_event_time                                       │  │
+│  │  → Sink: vm_metrics_held                                           │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────┬─────────────────────────────────────┘
+                                     │
+                                     ▼ JDBC (postgresql:42.7.2)
+┌──────────────────────────────────────────────────────────────────────────┐
+│                              STORAGE LAYER                               │
+│  TimescaleDB (PostgreSQL 15 + TimescaleDB extension)                     │
+│  • 3 Hypertables: vm_cpu_aggregates, vm_cpu_correlations,                │
+│    vm_metrics_held                                                       │
+│  • Chunked by time column for automatic partitioning                     │
+│  • Connection: localhost:5432 | postgres / password                      │
+└────────────────────────────────────┬─────────────────────────────────────┘
+                                     │
+                                     ▼ PostgreSQL datasource
+┌──────────────────────────────────────────────────────────────────────────┐
+│                           VISUALIZATION LAYER                            │
+│  Grafana (auto-provisioned)                                              │
+│  • URL: http://localhost:3000                                            │
+│  • Login: admin / admin                                                  │
+│  • Dashboard: "Cloud Telemetry Streaming Analytics"                      │
+│  • 6 panels: 3 operator rows + 3 health panels                           │
+│  • Auto-refresh: 5 seconds                                               │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
