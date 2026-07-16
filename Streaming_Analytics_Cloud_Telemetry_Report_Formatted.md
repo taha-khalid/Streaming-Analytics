@@ -20,28 +20,28 @@ The entire stack runs locally on Windows using Docker Desktop, requiring zero cl
 
 ### 2.1 Original Requirements
 
-| Requirement | Description |
-|-------------|-------------|
-| **Framework** | Apache Spark Streaming |
-| **Operator 1** | Moving Average — sliding window over CPU |
-| **Operator 2** | Time-Based Join — event time window join between multiple VMs |
-| **Operator 3** | Sample-and-Hold — forward fill for missing/irregular data |
-| **Pipeline** | Ingest → simulate event-time stream → windowed ops & joins → output |
-| **Dataset** | Azure VM Dataset (AzurePublicDatasetV2) |
+| Requirement    | Description                                                         |
+| -------------- | ------------------------------------------------------------------- |
+| **Framework**  | Apache Spark Streaming                                              |
+| **Operator 1** | Moving Average — sliding window over CPU                            |
+| **Operator 2** | Time-Based Join — event time window join between multiple VMs       |
+| **Operator 3** | Sample-and-Hold — forward fill for missing/irregular data           |
+| **Pipeline**   | Ingest → simulate event-time stream → windowed ops & joins → output |
+| **Dataset**    | Azure VM Dataset (AzurePublicDatasetV2)                             |
 
 ### 2.2 Implementation Mapping
 
-| Requirement | Status | Implementation Details |
-|-------------|--------|------------------------|
-| **Apache Spark Streaming** | ✅ Complete | PySpark 3.5.x Structured Streaming with 3 parallel `writeStream` queries. |
-| **Moving Average** | ✅ Complete | `window(event_time, 60s, 20s)` sliding window per VM; computes `avg`, `max`, `min`, `count` for CPU. |
-| **Time-Based Join** | ✅ Complete | Stream-stream join with explicit dataframe qualifiers and event-time constraints inside a 10s window to prevent state drops and ambiguous reference exceptions. |
-| **Sample-and-Hold** | ✅ Complete | Robust 5-minute sliding window with a 10-second slide utilizing positional `last(col, True)` to hold and propagate last known CPU states. |
-| **Event-Time Stream** | ✅ Complete | Producer assigns real Unix timestamps; processor uses `withWatermark` for 30-second late-data tolerance. |
-| **Windowed operations** | ✅ Complete | Sliding windows (Query 1), event-time bucket join (Query 2), sliding state-propagation windows (Query 3). |
-| **Aggregated results** | ✅ Complete | All three queries write aggregated DataFrames to TimescaleDB. |
-| **Azure V2 Dataset** | ✅ Complete | Reads `vm_cpu_readings-file-*.csv.gz` from local `data/` directory[cite: 3, 4]. |
-| **Grafana Output** | ✅ Complete | Auto-provisioned 6-panel dashboard with live refresh at `localhost:3000`. |
+| Requirement                | Status      | Implementation Details                                                                                                                                          |
+| -------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Apache Spark Streaming** | ✅ Complete | PySpark 3.5.x Structured Streaming with 3 parallel `writeStream` queries.                                                                                       |
+| **Moving Average**         | ✅ Complete | `window(event_time, 60s, 20s)` sliding window per VM; computes `avg`, `max`, `min`, `count` for CPU.                                                            |
+| **Time-Based Join**        | ✅ Complete | Stream-stream join with explicit dataframe qualifiers and event-time constraints inside a 10s window to prevent state drops and ambiguous reference exceptions. |
+| **Sample-and-Hold**        | ✅ Complete | Robust 5-minute sliding window with a 10-second slide utilizing positional `last(col, True)` to hold and propagate last known CPU states.                       |
+| **Event-Time Stream**      | ✅ Complete | Producer assigns real Unix timestamps; processor uses `withWatermark` for 30-second late-data tolerance.                                                        |
+| **Windowed operations**    | ✅ Complete | Sliding windows (Query 1), event-time bucket join (Query 2), sliding state-propagation windows (Query 3).                                                       |
+| **Aggregated results**     | ✅ Complete | All three queries write aggregated DataFrames to TimescaleDB.                                                                                                   |
+| **Azure V2 Dataset**       | ✅ Complete | Reads `vm_cpu_readings-file-*.csv.gz` from local `data/` directory[cite: 3, 4].                                                                                 |
+| **Grafana Output**         | ✅ Complete | Auto-provisioned 6-panel dashboard with live refresh at `localhost:3000`.                                                                                       |
 
 ---
 
@@ -49,7 +49,10 @@ The entire stack runs locally on Windows using Docker Desktop, requiring zero cl
 
 ### 3.1 High-Level Data Flow
 
+```
 ┌─────────────────────────────────────────────────────────────────────┐│                         DATA LAYER                                   ││  Azure V2 CPU Readings (.csv.gz)                                     ││  Columns: timestamp | vm_id | min_cpu | max_cpu | avg_cpu           ││  ~227,000 VMs per 5-min tick | 10M rows per file                   │└────────────────────────┬────────────────────────────────────────────┘│▼ producer.py┌─────────────────────────────────────────────────────────────────────┐│                       INGESTION LAYER                                ││  • Reads multiple CSV files                                          ││  • Samples 50 VMs per tick (scaled up from 10 to ensure join density)││  • Sends JSON events to Kafka topic telemetry-stream              ││  • Replay rate: 1 tick/sec (optimized for stable window processing)  │└────────────────────────┬────────────────────────────────────────────┘│▼ Redpanda (Kafka API on :19092)┌─────────────────────────────────────────────────────────────────────┐│                      MESSAGE BROKER                                  ││  • Redpanda v23.2.1 — ultra-lightweight Kafka-compatible broker   ││  • Topic: telemetry-stream                                        ││  • External listener: localhost:19092                               │└────────────────────────┬────────────────────────────────────────────┘│▼ processor.py (3 parallel queries)┌─────────────────────────────────────────────────────────────────────┐│                      PROCESSING LAYER                                ││  ┌─────────────────────────────────────────────────────────────┐    ││  │  Query 1 — MOVING AVERAGE                                     │    ││  │  window(60s, 20s) + groupBy(vm_id)                         │    ││  │  → avg_cpu, max_cpu, min_cpu, record_count                  │    ││  │  → Sink: vm_cpu_aggregates                                 │    ││  └─────────────────────────────────────────────────────────────┘    ││  ┌─────────────────────────────────────────────────────────────┐    ││  │  Query 2 — TIME-BASED JOIN                                   │    ││  │  Two streams joined with explicit dataframe references       │    ││  │  condition: event-time bounds and matching prefixes         │    ││  │  → cpu_a, cpu_b                                             │    ││  │  → Sink: vm_cpu_correlations                               │    ││  └─────────────────────────────────────────────────────────────┘    ││  ┌─────────────────────────────────────────────────────────────┐    ││  │  Query 3 — SAMPLE-AND-HOLD                                  │    ││  │  window(5m, 10s) + last(avg_cpu, True)                      │    ││  │  → cpu_held, last_event_time                                │    ││  │  → Sink: vm_metrics_held                                    │    ││  └─────────────────────────────────────────────────────────────┘    │└────────────────────────┬────────────────────────────────────────────┘│▼ JDBC (postgresql:42.7.2)┌─────────────────────────────────────────────────────────────────────┐│                        STORAGE LAYER                                 ││  TimescaleDB (PostgreSQL 15 + TimescaleDB extension)               ││  • 3 Hypertables: vm_cpu_aggregates, vm_cpu_correlations,          ││    vm_metrics_held                                                  ││  • Chunked by time column for automatic partitioning               ││  • Connection: localhost:5432 | postgres / password                │└────────────────────────┬────────────────────────────────────────────┘│▼ PostgreSQL datasource┌─────────────────────────────────────────────────────────────────────┐│                     VISUALIZATION LAYER                              ││  Grafana (auto-provisioned)                                         ││  • URL: http://localhost:3000                                        ││  • Login: admin / admin                                              ││  • Dashboard: "Cloud Telemetry Streaming Analytics"                  ││  • 6 panels: 3 operator rows + 3 health panels                     ││  • Auto-refresh: 5 seconds                                           │└─────────────────────────────────────────────────────────────────────┘
+```
+
 ---
 
 ## 4. Data Layer — Azure 2019 Public Dataset V2
@@ -62,18 +65,18 @@ https://github.com/Azure/AzurePublicDataset/blob/master/AzurePublicDatasetV2.md
 
 ### 4.2 Local File Structure
 
-data/azure-dataset/cpu/├── vm_cpu_readings-file-1-of-195.csv.gz   (10,000,000 rows)├── vm_cpu_readings-file-2-of-195.csv.gz├── ...└── vm_cpu_readings-file-195-of-195.csv.gz
+data/azure-dataset/cpu/├── vm_cpu_readings-file-1-of-195.csv.gz (10,000,000 rows)├── vm_cpu_readings-file-2-of-195.csv.gz├── ...└── vm_cpu_readings-file-195-of-195.csv.gz
 Total: ~1.95 billion rows across 195 files[cite: 3, 4].
 
 ### 4.3 Row Format
 
-| Column | Type | Example |
-|--------|------|---------|
-| `timestamp` | int (seconds) | `0`[cite: 3, 4] |
-| `vm_id` | string (hash) | `yNf/R3X8fyXkOJm3ihXQc...`[cite: 3, 4] |
-| `min_cpu` | float | `19.8984`[cite: 3, 4] |
-| `max_cpu` | float | `24.9963`[cite: 3, 4] |
-| `avg_cpu` | float | `22.6306`[cite: 3, 4] |
+| Column      | Type          | Example                                |
+| ----------- | ------------- | -------------------------------------- |
+| `timestamp` | int (seconds) | `0`[cite: 3, 4]                        |
+| `vm_id`     | string (hash) | `yNf/R3X8fyXkOJm3ihXQc...`[cite: 3, 4] |
+| `min_cpu`   | float         | `19.8984`[cite: 3, 4]                  |
+| `max_cpu`   | float         | `24.9963`[cite: 3, 4]                  |
+| `avg_cpu`   | float         | `22.6306`[cite: 3, 4]                  |
 
 ### 4.4 Temporal Structure
 
@@ -88,18 +91,19 @@ Total: ~1.95 billion rows across 195 files[cite: 3, 4].
 ### 5.1 Purpose
 
 Reads historical CSV data and simulates a **live, real-time event stream** by:
+
 1. Extracting a subset of VMs per tick[cite: 3, 4].
 2. Converting trace-relative timestamps to real Unix timestamps[cite: 3, 4].
 3. Publishing JSON events to Kafka[cite: 3, 4].
 
 ### 5.2 Key Design Decisions
 
-| Decision | Rationale |
-|----------|-----------|
-| **Increased Sample Size** | `VMS_PER_TICK = 50` ensures that there is ample overlapping metric data to satisfy joins and avoid sparse database entries. |
-| **1 Tick/Second Speed** | Paced real-time speed allows Spark Streaming queries to process large window states without bottlenecking execution resources[cite: 3]. |
-| **Loop forever** | When files end, restart from the beginning for continuous streaming[cite: 3, 4]. |
-| **Gzip compression** | Kafka producer uses gzip to reduce network I/O[cite: 3, 4]. |
+| Decision                  | Rationale                                                                                                                               |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Increased Sample Size** | `VMS_PER_TICK = 50` ensures that there is ample overlapping metric data to satisfy joins and avoid sparse database entries.             |
+| **1 Tick/Second Speed**   | Paced real-time speed allows Spark Streaming queries to process large window states without bottlenecking execution resources[cite: 3]. |
+| **Loop forever**          | When files end, restart from the beginning for continuous streaming[cite: 3, 4].                                                        |
+| **Gzip compression**      | Kafka producer uses gzip to reduce network I/O[cite: 3, 4].                                                                             |
 
 ### 5.3 Code Structure
 
@@ -164,7 +168,7 @@ correlation_df = left_filtered.join(
     (left_filtered["win_start"] == right_filtered["win_start"]) &
     (col("event_time_b") >= col("event_time_a") - expr("INTERVAL 10 SECONDS")) &
     (col("event_time_b") <= col("event_time_a") + expr("INTERVAL 10 SECONDS")) &
-    (col("vm_id_a") < col("vm_id_b")) & 
+    (col("vm_id_a") < col("vm_id_b")) &
     (substring(col("vm_id_a"), 1, 1) == substring(col("vm_id_b"), 1, 1)),
     how="inner"
 )
@@ -224,3 +228,4 @@ SELECT create_hypertable('vm_metrics_held', 'window_start');
 10. How to RunPrerequisites (one-time)Install Java 17 to C:\Users\Havoc\java17\jdk-17.0.12+7[cite: 4]Install Docker Desktop and start it[cite: 4]Copy winutils.exe and hadoop.dll to C:\hadoop\bin\[cite: 4]Set HADOOP_HOME=C:\hadoop[cite: 4]Create C:\hadoop\checkpoints\telemetry_pipeline[cite: 4]Quick Start (One Command)PowerShellcd Streaming-Analytics
 .\run_pipeline.ps1
 11. Troubleshooting GuideSymptomCauseFixAMBIGUOUS_REFERENCE on joinSame column names on left and right join schemas.  Use explicit Dataframe referencing on .join() conditions.  TypeError in last()ignoreNulls keyword rejected.  Pass the boolean value True as a positional argument.  Empty Join GraphLow VM sampling density in stream[cite: 3].Increase VMS_PER_TICK parameter to 50 in producer.py[cite: 3].Fragmented Step PlotShort window state timeout[cite: 2].Scale tumbling window up to window("300 seconds", "10 seconds")[cite: 2].12. ConclusionThis project delivers a complete, working streaming analytics pipeline that satisfies every requirement in the original description:Apache Spark Structured Streaming processes real-time data from a Kafka-compatible broker[cite: 2, 4].Three streaming operators (Moving Average, Time-Based Join, Sample-and-Hold) are implemented as separate, parallel Spark queries with independent checkpoint locations[cite: 2, 4].Event-time semantics are correctly handled via watermarks and timestamp-based windows[cite: 2, 4].TimescaleDB stores the aggregated outputs in time-optimized hypertables[cite: 2, 4].Grafana auto-provisions with a datasource and a 6-panel dashboard that visualizes all three operators plus pipeline health metrics[cite: 4].The entire system is zero-cloud, runs on Windows, and can be started with a single PowerShell command (./run_pipeline.ps1)[cite: 4].Report generated for the Big Data Streaming Analytics course — Development Branch[cite: 4].
+```
