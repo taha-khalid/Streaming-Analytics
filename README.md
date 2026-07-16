@@ -36,7 +36,7 @@ TimescaleDB Hypertables ◄──► Live Grafana Dashboard
 | Message Broker   | Redpanda (Kafka API) | Containerized v23.2.1 or later        |
 | Time-Series DB   | TimescaleDB          | latest-pg15                           |
 | Stream Engine    | Apache PySpark       | 3.5.x                                 |
-| Windows Helper   | Hadoop Winutils      | 3.3.0                                 |
+| Windows Helper   | Hadoop Winutils      | 3.3.6                                 |
 
 ---
 
@@ -72,20 +72,30 @@ Spark on Windows requires a native Hadoop helper binary.
 C:\hadoop\bin
 ```
 
-2. Download `winutils.exe` and `hadoop.dll` for Hadoop 3.3.0 from:
-   https://github.com/cdarlint/winutils/tree/master/hadoop-3.3.0/bin
+2. Download Hadoop version 3.3.6:
+   ```
+   git clone --filter=blob:none --no-checkout https://github.com/cdarlint/winutils.git
+   cd winutils
+   git sparse-checkout init --cone
+   git sparse-checkout set hadoop-3.3.6
+   git checkout master
+   ```
 
-3. Place both files here:
+3. Copy the folder hadoop-3.3.6 to:
+   ```
+   C:\Program Files\
+   ```
+5. Copy and place `winutils.exe` and `hadoop.dll` files here:
 
 ```
 C:\hadoop\bin\winutils.exe
 C:\hadoop\bin\hadoop.dll
 ```
 
-4. Set environment variable:
+5. Set environment variable:
 
 ```
-HADOOP_HOME = C:\hadoop
+HADOOP_HOME = C:\Program Files\hadoop-3.3.6
 ```
 
 5. Add to PATH:
@@ -97,7 +107,7 @@ HADOOP_HOME = C:\hadoop
 6. Create a Spark checkpoint directory:
 
 ```powershell
-mkdir C:\hadoop\checkpoints\telemetry_pipeline
+mkdir C:\hadoop\checkpoints\
 ```
 
 ---
