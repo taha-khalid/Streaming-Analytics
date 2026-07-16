@@ -33,7 +33,7 @@ TimescaleDB Hypertables ◄──► Live Grafana Dashboard
 | Container Engine | Docker Desktop       | Latest Stable                         |
 | Language Runtime | Python               | 3.11 or 3.12                          |
 | Java Runtime     | Eclipse Temurin JDK  | 17 (Required for Spark compatibility) |
-| Message Broker   | Redpanda (Kafka API) | Containerized v23.2.1 or later          |
+| Message Broker   | Redpanda (Kafka API) | Containerized v23.2.1 or later        |
 | Time-Series DB   | TimescaleDB          | latest-pg15                           |
 | Stream Engine    | Apache PySpark       | 3.5.x                                 |
 | Windows Helper   | Hadoop Winutils      | 3.3.0                                 |
@@ -53,6 +53,7 @@ C:\Users\Havoc\java17\jdk-17.0.12+7
 If you have a different Java 17 installation, update the path in `run_pipeline.ps1` accordingly.
 
 Verify:
+
 ```powershell
 C:\Users\Havoc\java17\jdk-17.0.12+7\bin\java -version
 ```
@@ -151,6 +152,7 @@ pip install -r requirements.txt
 ```
 
 This script will:
+
 1. Verify Java 17, Python, and Docker
 2. Start the Docker stack (if not already running)
 3. Launch the Spark processor in a background job
@@ -200,14 +202,14 @@ Default login:
 
 The dashboard is **auto-provisioned** and includes:
 
-| Panel | Description | Operator |
-|-------|-------------|----------|
-| **CPU Moving Average by VM** | Sliding-window avg of CPU per VM | Moving Average |
-| **Cross-VM CPU Correlation** | Paired VM CPU metrics from time-based join | Time-Based Join |
-| **CPU Sample-and-Hold** | Step-plot of last-known CPU values per window | Sample-and-Hold |
-| **Records per Window** | Bar chart of throughput | Health |
-| **Top 10 VMs by Avg CPU** | Bar gauge of hottest VMs | Health |
-| **Latest VM Summary** | Table of latest aggregated stats | Health |
+| Panel                        | Description                                   | Operator        |
+| ---------------------------- | --------------------------------------------- | --------------- |
+| **CPU Moving Average by VM** | Sliding-window avg of CPU per VM              | Moving Average  |
+| **Cross-VM CPU Correlation** | Paired VM CPU metrics from time-based join    | Time-Based Join |
+| **CPU Sample-and-Hold**      | Step-plot of last-known CPU values per window | Sample-and-Hold |
+| **Records per Window**       | Bar chart of throughput                       | Health          |
+| **Top 10 VMs by Avg CPU**    | Bar gauge of hottest VMs                      | Health          |
+| **Latest VM Summary**        | Table of latest aggregated stats              | Health          |
 
 ---
 
@@ -221,6 +223,7 @@ Slide:  20 seconds
 ```
 
 Spark Structured Streaming groups events by `(window, vm_id)` and computes:
+
 - `avg(avg_cpu)` — mean CPU utilization
 - `max(max_cpu)` — peak CPU in window
 - `min(min_cpu)` — minimum CPU in window
@@ -240,6 +243,7 @@ Join condition: vm_id_a != vm_id_b
 ```
 
 Two independent Kafka source streams are joined on a common 10-second time bucket. This detects VMs that are experiencing similar CPU pressure at the same time, which can indicate:
+
 - Co-located noisy neighbors
 - Cluster-wide workload spikes
 - Scheduled batch jobs running across multiple VMs
@@ -265,13 +269,13 @@ Captures the last known CPU reading within each tumbling window. This demonstrat
 
 The **Azure 2019 Public Dataset V2** ships CPU readings as `.csv.gz` files. Each file contains:
 
-| Column | Description |
-|--------|-------------|
+| Column      | Description                              |
+| ----------- | ---------------------------------------- |
 | `timestamp` | Relative trace time (seconds from start) |
-| `vm_id` | Unique VM identifier (hashed) |
-| `min_cpu` | Minimum CPU % in the 5-minute interval |
-| `max_cpu` | Maximum CPU % in the 5-minute interval |
-| `avg_cpu` | Average CPU % in the 5-minute interval |
+| `vm_id`     | Unique VM identifier (hashed)            |
+| `min_cpu`   | Minimum CPU % in the 5-minute interval   |
+| `max_cpu`   | Maximum CPU % in the 5-minute interval   |
+| `avg_cpu`   | Average CPU % in the 5-minute interval   |
 
 ---
 
@@ -359,4 +363,4 @@ Streaming-Analytics/
 
 ---
 
-*Built for the Big Data Streaming Analytics course. All components run locally on Windows with zero cloud dependencies.*
+_Built for the Big Data Streaming Analytics course. All components run locally on Windows with zero cloud dependencies._
