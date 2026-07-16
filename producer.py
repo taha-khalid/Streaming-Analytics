@@ -17,8 +17,8 @@ TOPIC = 'telemetry-stream'
 DATA_DIR = './data/azure-dataset/cpu'
 
 # Streaming simulation parameters
-TICKS_PER_BATCH = 1000       # How many 5-min trace ticks to read (~83 hours trace)
-VMS_PER_TICK = 3              # Sample N VMs per tick (dataset has ~227k VMs/tick)
+TICKS_PER_BATCH = 1500         # How many 5-min trace ticks to read (~83 hours trace)
+VMS_PER_TICK = 50              # Sample N VMs per tick (dataset has ~227k VMs/tick)
 TICKS_PER_SECOND = 1           # Real-time replay speed (2 ticks/sec = 500s to consume 1000 ticks)
 
 # =============================================================================

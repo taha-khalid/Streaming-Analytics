@@ -3,6 +3,7 @@ import time
 import sys
 import pyspark
 from pyspark.sql import SparkSession
+from pyspark.sql.functions import substring
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -173,35 +174,80 @@ print("⚡ Query 1 started: Moving Average (sliding window 60s/20s) -> vm_cpu_ag
 # Spark stream-stream joins require an equality predicate — we use a common
 # 10-second time bucket as the equality key.
 # =============================================================================
-left_renamed = create_kafka_source_stream("left") \
-    .withColumn("event_window", window(col("event_time"), "10 seconds", "10 seconds")) \
-    .withColumn("win_start", col("event_window.start")) \
+# left_renamed = create_kafka_source_stream("left") \
+#     .withColumn("event_window", window(col("event_time"), "10 seconds", "10 seconds")) \
+#     .withColumn("win_start", col("event_window.start")) \
+#     .withColumnRenamed("vm_id", "vm_id_a") \
+#     .withColumnRenamed("avg_cpu", "cpu_a")
+
+# right_renamed = create_kafka_source_stream("right") \
+#     .withColumn("event_window", window(col("event_time"), "10 seconds", "10 seconds")) \
+#     .withColumn("win_start", col("event_window.start")) \
+#     .withColumnRenamed("vm_id", "vm_id_b") \
+#     .withColumnRenamed("avg_cpu", "cpu_b")
+
+# correlation_df = left_renamed.join(
+#     right_renamed,
+#     "win_start",
+#     how="inner"
+# ).filter(col("vm_id_a") != col("vm_id_b")) \
+#     .select(
+#         col("win_start").alias("window_start"),
+#         col("vm_id_a"),
+#         col("vm_id_b"),
+#         coalesce(col("cpu_a"), lit(0.0)).alias("cpu_a"),
+#         coalesce(col("cpu_b"), lit(0.0)).alias("cpu_b")
+#     )
+
+# =============================================================================
+# 5. OPERATOR 2 — TIME-BASED JOIN (Cross-VM Event Window)
+# =============================================================================
+
+# =============================================================================
+# 5. OPERATOR 2 — TIME-BASED JOIN (Cross-VM Event Window)
+# =============================================================================
+
+# 1. Prepare Left Stream (Keep win_start as is, but we will reference it via left_filtered)
+left_filtered = create_kafka_source_stream("left") \
+    .withColumn("win_start", window(col("event_time"), "10 seconds").getField("start")) \
     .withColumnRenamed("vm_id", "vm_id_a") \
-    .withColumnRenamed("avg_cpu", "cpu_a")
+    .withColumnRenamed("avg_cpu", "cpu_a") \
+    .withColumnRenamed("event_time", "event_time_a")
 
-right_renamed = create_kafka_source_stream("right") \
-    .withColumn("event_window", window(col("event_time"), "10 seconds", "10 seconds")) \
-    .withColumn("win_start", col("event_window.start")) \
+# 2. Prepare Right Stream
+right_filtered = create_kafka_source_stream("right") \
+    .withColumn("win_start", window(col("event_time"), "10 seconds").getField("start")) \
     .withColumnRenamed("vm_id", "vm_id_b") \
-    .withColumnRenamed("avg_cpu", "cpu_b")
+    .withColumnRenamed("avg_cpu", "cpu_b") \
+    .withColumnRenamed("event_time", "event_time_b")
 
-correlation_df = left_renamed.join(
-    right_renamed,
-    "win_start",
+# 3. Perform the Join using DataFrame references to clear up ambiguity
+correlation_df = left_filtered.join(
+    right_filtered,
+    # By using left_filtered["win_start"], Spark knows exactly which column is which
+    (left_filtered["win_start"] == right_filtered["win_start"]) &
+    (col("event_time_b") >= col("event_time_a") - expr("INTERVAL 10 SECONDS")) &
+    (col("event_time_b") <= col("event_time_a") + expr("INTERVAL 10 SECONDS")) &
+    (col("vm_id_a") < col("vm_id_b")) & 
+    (substring(col("vm_id_a"), 1, 1) == substring(col("vm_id_b"), 1, 1)),
     how="inner"
-).filter(col("vm_id_a") != col("vm_id_b")) \
-    .select(
-        col("win_start").alias("window_start"),
-        col("vm_id_a"),
-        col("vm_id_b"),
-        coalesce(col("cpu_a"), lit(0.0)).alias("cpu_a"),
-        coalesce(col("cpu_b"), lit(0.0)).alias("cpu_b")
-    )
+).select(
+    left_filtered["win_start"].alias("window_start"), # Explicitly select from the left side
+    col("vm_id_a"),
+    col("vm_id_b"),
+    coalesce(col("cpu_a"), lit(0.0)).alias("cpu_a"),
+    coalesce(col("cpu_b"), lit(0.0)).alias("cpu_b")
+)
 
 query_correlation = correlation_df.writeStream \
     .foreachBatch(lambda df, bid: write_to_postgres(df, bid, "vm_cpu_correlations")) \
     .option("checkpointLocation", f"{CHECKPOINT_DIR}/correlations") \
     .start()
+
+# query_correlation = correlation_df.writeStream \
+#     .foreachBatch(lambda df, bid: write_to_postgres(df, bid, "vm_cpu_correlations")) \
+#     .option("checkpointLocation", f"{CHECKPOINT_DIR}/correlations") \
+#     .start()
 
 print("⚡ Query 2 started: Time-Based Join (10-second event bucket) -> vm_cpu_correlations")
 
@@ -212,14 +258,39 @@ print("⚡ Query 2 started: Time-Based Join (10-second event bucket) -> vm_cpu_c
 # This demonstrates the canonical "last-value propagation" pattern used in
 # streaming systems to handle irregular or sparse reporting cadences.
 # =============================================================================
+# raw_stream_3 = create_kafka_source_stream("raw_3")
+
+# sample_hold = raw_stream_3 \
+#     .groupBy(
+#         window(col("event_time"), "30 seconds", "30 seconds"),
+#         col("vm_id")
+#     ) \
+#     .agg(
+#         last("avg_cpu", True).alias("cpu_held"),
+#         max("event_time").alias("last_event_time")
+#     ) \
+#     .select(
+#         col("window.start").alias("window_start"),
+#         col("window.end").alias("window_end"),
+#         col("vm_id"),
+#         coalesce(col("cpu_held"), lit(0.0)).alias("cpu_held"),
+#         col("last_event_time")
+#     )
+
+# In processor.py, rewrite Operator 3 to use a wider sliding window to bridge telemetry gaps:
+# =============================================================================
+# 6. OPERATOR 3 — SAMPLE-AND-HOLD (Last Value Per Window)
+# =============================================================================
 raw_stream_3 = create_kafka_source_stream("raw_3")
 
 sample_hold = raw_stream_3 \
     .groupBy(
-        window(col("event_time"), "30 seconds", "30 seconds"),
+        # 5-minute window retains the last known value longer; sliding every 10s updates it
+        window(col("event_time"), "300 seconds", "10 seconds"),
         col("vm_id")
     ) \
     .agg(
+        # Pass True as a positional argument instead of ignoreNulls=True
         last("avg_cpu", True).alias("cpu_held"),
         max("event_time").alias("last_event_time")
     ) \
