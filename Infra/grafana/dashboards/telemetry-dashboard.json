@@ -1,0 +1,360 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 50,
+      "panels": [],
+      "title": "Operator 1 — Moving Average (Sliding Window)",
+      "type": "row"
+    },
+    {
+      "datasource": "TelemetryDB",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "pointSize": 0,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  time_bucket('10 seconds', window_start) AS time,\n  vm_id AS metric,\n  avg(avg_cpu) AS value\nFROM vm_cpu_aggregates\nWHERE window_start >= $__timeFrom()\n  AND window_start <= $__timeTo()\nGROUP BY time, vm_id\nORDER BY time;",
+          "refId": "A"
+        }
+      ],
+      "title": "CPU Moving Average by VM",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "id": 51,
+      "panels": [],
+      "title": "Operator 2 — Time-Based Join (Cross-VM Event Window)",
+      "type": "row"
+    },
+    {
+      "datasource": "TelemetryDB",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "pointSize": 3,
+            "showPoints": "always"
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  time_bucket('10 seconds', window_start) AS time,\n  vm_id_a || ' x ' || vm_id_b AS metric,\n  avg(cpu_a) AS value\nFROM vm_cpu_correlations\nWHERE window_start >= $__timeFrom()\n  AND window_start <= $__timeTo()\nGROUP BY time, vm_id_a, vm_id_b\nORDER BY time;",
+          "refId": "A"
+        }
+      ],
+      "title": "Cross-VM CPU Correlation (Time-Join)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "id": 52,
+      "panels": [],
+      "title": "Operator 3 — Sample-and-Hold (Last Value Per Window)",
+      "type": "row"
+    },
+    {
+      "datasource": "TelemetryDB",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "pointSize": 0,
+            "showPoints": "never"
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  time_bucket('10 seconds', window_start) AS time,\n  vm_id AS metric,\n  avg(cpu_held) AS value\nFROM vm_metrics_held\nWHERE window_start >= $__timeFrom()\n  AND window_start <= $__timeTo()\nGROUP BY time, vm_id\nORDER BY time;",
+          "refId": "A"
+        }
+      ],
+      "title": "CPU Sample-and-Hold (Step Plot)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "id": 53,
+      "panels": [],
+      "title": "Pipeline Health — Aggregated Statistics",
+      "type": "row"
+    },
+    {
+      "datasource": "TelemetryDB",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "fillOpacity": 60,
+            "pointSize": 0
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 28
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  time_bucket('10 seconds', window_start) AS time,\n  'records' AS metric,\n  sum(record_count) AS value\nFROM vm_cpu_aggregates\nWHERE window_start >= $__timeFrom()\n  AND window_start <= $__timeTo()\nGROUP BY time\nORDER BY time;",
+          "refId": "A"
+        }
+      ],
+      "title": "Records per Window (Throughput)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "TelemetryDB",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "displayMode": "lcd",
+            "orientation": "auto"
+          },
+          "unit": "percent",
+          "max": 100,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 28
+      },
+      "id": 8,
+      "options": {
+        "orientation": "auto",
+        "displayMode": "lcd",
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  vm_id,\n  avg(avg_cpu) AS avg_cpu\nFROM vm_cpu_aggregates\nWHERE window_start >= $__timeFrom()\nGROUP BY vm_id\nORDER BY avg_cpu DESC\nLIMIT 10;",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 10 VMs by Avg CPU (Last 5m)",
+      "transformations": [],
+      "type": "bargauge"
+    },
+    {
+      "datasource": "TelemetryDB",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto"
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 28
+      },
+      "id": 9,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  vm_id,\n  avg(avg_cpu) AS avg_cpu,\n  sum(record_count) AS total_records\nFROM vm_cpu_aggregates\nWHERE window_start >= $__timeFrom()\nGROUP BY vm_id\nORDER BY avg_cpu DESC\nLIMIT 10;",
+          "refId": "A"
+        }
+      ],
+      "title": "Latest VM Summary",
+      "type": "table"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 30,
+  "style": "dark",
+  "tags": [
+    "streaming",
+    "telemetry",
+    "spark"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "2h",
+      "1d"
+    ]
+  },
+  "timezone": "utc",
+  "title": "Cloud Telemetry Streaming Analytics",
+  "uid": "telemetry-streaming-01",
+  "version": 2
+}

@@ -1,39 +1,70 @@
-version: "3.7"
+version: "3.8"
+
 services:
-  # Redpanda acts as our ultra-lightweight Kafka broker
   redpanda:
-    image: docker.redpanda.com/redpandadata/redpanda:v23.2.1
+    image: redpandadata/redpanda:v23.2.1
+    container_name: redpanda
     command:
       - redpanda start
       - --smp 1
+      - --reserve-memory 0M
       - --overprovisioned
       - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
       - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
     ports:
       - "19092:19092"
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - telemetry-net
 
-  # Grafana for real-time visualization
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    depends_on:
-      - redpanda
-  
   timescaledb:
     image: timescale/timescaledb:latest-pg15
     container_name: timescaledb
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=telemetry_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: telemetry_db
     ports:
       - "5432:5432"
     volumes:
       - timescale_data:/var/lib/postgresql/data
+      - ./table_creation_query.pgsql:/docker-entrypoint-initdb.d/01-init.sql:ro
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d telemetry_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - telemetry-net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=bObgUv22Mr8WhR
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    restart: always
+    networks:
+      - telemetry-net
 
 volumes:
   timescale_data:
+  grafana_data:
+
+networks:
+  telemetry-net:
+    driver: bridge
