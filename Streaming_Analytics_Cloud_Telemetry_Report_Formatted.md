@@ -40,7 +40,7 @@ The entire stack runs locally on Windows using Docker Desktop, requiring zero cl
 | **Event-Time Stream**      | ✅ Complete | Producer assigns real Unix timestamps; processor uses `withWatermark` for 30-second late-data tolerance.                                                        |
 | **Windowed operations**    | ✅ Complete | Sliding windows (Query 1), event-time bucket join (Query 2), sliding state-propagation windows (Query 3).                                                       |
 | **Aggregated results**     | ✅ Complete | All three queries write aggregated DataFrames to TimescaleDB.                                                                                                   |
-| **Azure V2 Dataset**       | ✅ Complete | Reads `vm_cpu_readings-file-*.csv.gz` from local `data/` directory[cite: 3, 4].                                                                                 |
+| **Azure V2 Dataset**       | ✅ Complete | Reads `vm_cpu_readings-file-*.csv.gz` from local `data/` directory.                                                                                             |
 | **Grafana Output**         | ✅ Complete | Auto-provisioned 6-panel dashboard with live refresh at `localhost:3000`.                                                                                       |
 
 ---
@@ -133,23 +133,23 @@ https://github.com/Azure/AzurePublicDataset/blob/master/AzurePublicDatasetV2.md
 ### 4.2 Local File Structure
 
 data/azure-dataset/cpu/├── vm_cpu_readings-file-1-of-195.csv.gz (10,000,000 rows)├── vm_cpu_readings-file-2-of-195.csv.gz├── ...└── vm_cpu_readings-file-195-of-195.csv.gz
-Total: ~1.95 billion rows across 195 files[cite: 3, 4].
+Total: ~1.95 billion rows across 195 files.
 
 ### 4.3 Row Format
 
-| Column      | Type          | Example                                |
-| ----------- | ------------- | -------------------------------------- |
-| `timestamp` | int (seconds) | `0`[cite: 3, 4]                        |
-| `vm_id`     | string (hash) | `yNf/R3X8fyXkOJm3ihXQc...`[cite: 3, 4] |
-| `min_cpu`   | float         | `19.8984`[cite: 3, 4]                  |
-| `max_cpu`   | float         | `24.9963`[cite: 3, 4]                  |
-| `avg_cpu`   | float         | `22.6306`[cite: 3, 4]                  |
+| Column      | Type          | Example                    |
+| ----------- | ------------- | -------------------------- |
+| `timestamp` | int (seconds) | `0`                        |
+| `vm_id`     | string (hash) | `yNf/R3X8fyXkOJm3ihXQc...` |
+| `min_cpu`   | float         | `19.8984`                  |
+| `max_cpu`   | float         | `24.9963`                  |
+| `avg_cpu`   | float         | `22.6306`                  |
 
 ### 4.4 Temporal Structure
 
 - Each **tick** (unique timestamp) contains ~227,316 VM records
 - Ticks are spaced 300 seconds (5 minutes) apart
-- The first file contains ~44 ticks = ~220 minutes of trace time[cite: 4]
+- The first file contains ~44 ticks = ~220 minutes of trace time
 
 ---
 
@@ -159,38 +159,38 @@ Total: ~1.95 billion rows across 195 files[cite: 3, 4].
 
 Reads historical CSV data and simulates a **live, real-time event stream** by:
 
-1. Extracting a subset of VMs per tick[cite: 3, 4].
-2. Converting trace-relative timestamps to real Unix timestamps[cite: 3, 4].
-3. Publishing JSON events to Kafka[cite: 3, 4].
+1. Extracting a subset of VMs per tick.
+2. Converting trace-relative timestamps to real Unix timestamps.
+3. Publishing JSON events to Kafka.
 
 ### 5.2 Key Design Decisions
 
-| Decision                  | Rationale                                                                                                                               |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| **Increased Sample Size** | `VMS_PER_TICK = 50` ensures that there is ample overlapping metric data to satisfy joins and avoid sparse database entries.             |
-| **1 Tick/Second Speed**   | Paced real-time speed allows Spark Streaming queries to process large window states without bottlenecking execution resources[cite: 3]. |
-| **Loop forever**          | When files end, restart from the beginning for continuous streaming[cite: 3, 4].                                                        |
-| **Gzip compression**      | Kafka producer uses gzip to reduce network I/O[cite: 3, 4].                                                                             |
+| Decision                  | Rationale                                                                                                                      |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **Increased Sample Size** | `VMS_PER_TICK = 50` ensures that there is ample overlapping metric data to satisfy joins and avoid sparse database entries.    |
+| **1 Tick/Second Speed**   | Paced real-time speed allows Spark Streaming queries to process large window states without bottlenecking execution resources. |
+| **Loop forever**          | When files end, restart from the beginning for continuous streaming.                                                           |
+| **Gzip compression**      | Kafka producer uses gzip to reduce network I/O.                                                                                |
 
 ### 5.3 Code Structure
 
 ```python
 # Configurable parameters
 TICKS_PER_BATCH = 1500      # Optimized to capture ~125 trace hours
-VMS_PER_TICK = 50           # Increased density[cite: 3]
-TICKS_PER_SECOND = 1        # Adjusted for ingestion consistency[cite: 3]
+VMS_PER_TICK = 50           # Increased density
+TICKS_PER_SECOND = 1        # Adjusted for ingestion consistency
 ```
 
 # Functions
 
 ```python
-get_data_files()            # Discover .csv.gz files[cite: 3, 4]
-read_trace_batches(files)   # Generator: yield (tick, [rows])[cite: 3, 4]
-produce_tick(...)           # Send to Kafka with JSON payload[cite: 3, 4]
+get_data_files()            # Discover .csv.gz files
+read_trace_batches(files)   # Generator: yield (tick, [rows])
+produce_tick(...)           # Send to Kafka with JSON payload
 main()
 ```
 
-                      # Loop forever[cite: 3, 4]
+# Loop forever
 
 ### 5.4 Event Payload Schema
 
