@@ -36,7 +36,7 @@ TimescaleDB Hypertables ◄──► Live Grafana Dashboard
 | Message Broker   | Redpanda (Kafka API) | Containerized v23.2.1 or later        |
 | Time-Series DB   | TimescaleDB          | latest-pg15                           |
 | Stream Engine    | Apache PySpark       | 3.5.x                                 |
-| Windows Helper   | Hadoop Winutils      | 3.3.0                                 |
+| Windows Helper   | Hadoop Winutils      | 3.3.6                                 |
 
 ---
 
